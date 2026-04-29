@@ -1,0 +1,37 @@
+{
+  "name": "api-mssql",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "start": "nodemon api.js",
+    "dev": "set NODE_ENV=test && nodemon api.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "body-parser": "^1.19.0",
+    "cors": "^2.8.5",
+    "dotenv": "^10.0.0",
+    "express": "^4.17.1",
+    "googleapis": "^161.0.0",
+    "iuu": "^0.0.1",
+    "jsonwebtoken": "^9.0.3",
+    "mssql": "^7.1.3",
+    "multer": "^1.4.5-lts.1",
+    "nodemailer": "^6.9.14",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "nodemon": "^2.0.20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/grupoelcerezo/api-sql142.git"
+  },
+  "bugs": {
+    "url": "https://github.com/grupoelcerezo/api-sql142/issues"
+  },
+  "homepage": "https://github.com/grupoelcerezo/api-sql142#readme",
+  "description": ""
+}

@@ -1,0 +1,29 @@
+api2-sql142 — API mínima para viaticosApp
+====================================
+
+Qué incluye
+-----------
+Solo las rutas que usa el front de viaticos (mismo prefijo /api/...):
+  - POST   /api/login/loginT
+  - GET    /api/login/getusuarioExisteViaticos/:email
+  - Viáticos: addviaticos, vincularDrive, getviaticos, getHistorialSubordinados,
+    getViaticosEstatus234, getViaticosConfirmacion, updateEstatusOperativo,
+    updateEstatusGerente, updateEstatusComprobacion
+  - Drive:  POST /api/altadrive/uploadviaticos
+            POST /api/altadrive/uploadEvidenciasOperativas
+  - GET    /api/health  (verificación de servicio)
+
+Requisitos
+----------
+1) Copiar desde api-sql142 (mismo criterio que el proyecto grande):
+   - .env.development  (o el entorno que use NODE_ENV) con DB_*, JWT_*, etc.
+2) Copiar credentials.json de Google (OAuth tipo "web") en la raíz de api2-sql142.
+   Sin este archivo el servidor igual arranca; solo fallarán las rutas que suben a Drive
+   hasta que lo agregue y configure ACCESS_TOKEN / REFRESH_TOKEN en .env.
+3) npm install
+4) node api.js   (o npm run dev con nodemon)
+
+Puerto: por defecto 3004. Para otro puerto: set PORT=... (Windows: $env:PORT=...) y ajuste viaticosApp/config-api.js.
+
+Nota: no levante api-sql142 y api2-sql142 a la vez en el mismo puerto.
+viaticosApp usa el archivo config-api.js para apuntar a un solo origen.
