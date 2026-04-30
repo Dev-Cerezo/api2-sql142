@@ -1,5 +1,5 @@
 /**
- * Una sola tabla (sql/CosechaAguacate.sql): filas Excel + metadatos.
+ * Tabla dbo.tb_wap_CosechaAguacate_Registro_temperaturas_reg_01 — columnas explícitas (sin JSON).
  */
 const TABLA_REGISTRO =
   "dbo.tb_wap_CosechaAguacate_Registro_temperaturas_reg_01";
@@ -18,7 +18,11 @@ function normalizarTexto(s) {
 }
 
 function slugHeader(celda) {
-  const t = normalizarTexto(celda).replace(/\s+/g, "_").replace(/[^a-z0-9_]/g, "");
+  const raw = String(celda ?? "").trim();
+  if (raw === "#") {
+    return null;
+  }
+  const t = normalizarTexto(raw).replace(/\s+/g, "_").replace(/[^a-z0-9_]/g, "");
   return t || null;
 }
 
@@ -30,6 +34,9 @@ function columnaEsTemperatura(key) {
   if (!k) {
     return false;
   }
+  if (/punto.*condens|condensacion|dew.*point|rocio/.test(k)) {
+    return false;
+  }
   return (
     /temp|temperat|celsius|^c$|°|centigrad/i.test(k) ||
     k === "t" ||
@@ -38,7 +45,32 @@ function columnaEsTemperatura(key) {
 }
 
 /**
- * Detecta columna(s) de fecha/hora procedente del archivo.
+ * Humedad relativa (%), p. ej. "Ch:2 - RH (%)" → slug ch2_rh_pct.
+ */
+function columnaEsHumedadRelativa(key) {
+  const k = normalizarTexto(key);
+  if (!k) {
+    return false;
+  }
+  if (/temp|temperat|condens|rocio|dew|punto/.test(k)) {
+    return false;
+  }
+  return k.includes("rh") || k.includes("humedad") || k.includes("hum_rel");
+}
+
+/**
+ * Punto de rocío / condensación (°C).
+ */
+function columnaEsPuntoCondensacion(key) {
+  const k = normalizarTexto(key);
+  if (!k) {
+    return false;
+  }
+  return /condensacion|condens|dew|rocio|punto_de_condens/.test(k);
+}
+
+/**
+ * Columna(s) de fecha/hora procedente del archivo / sensor.
  */
 function columnaEsFechaArchivo(key) {
   const k = normalizarTexto(key);
@@ -57,5 +89,7 @@ module.exports = {
   normalizarTexto,
   slugHeader,
   columnaEsTemperatura,
+  columnaEsHumedadRelativa,
+  columnaEsPuntoCondensacion,
   columnaEsFechaArchivo,
 };

@@ -30,6 +30,12 @@ function handleCatch(error, response) {
       codigo: "ARCHIVO_DUPLICADO",
     });
   }
+  if (/invalid column name/i.test(msg)) {
+    return response.status(500).json({
+      success: false,
+      error: msg.trim(),
+    });
+  }
   console.error("cosecha-aguacate", error);
   return response.status(500).json({
     success: false,
@@ -37,17 +43,43 @@ function handleCatch(error, response) {
   });
 }
 
+function opcionesManualDesdeBody(req, usuario_alta, codigo_centro_costo) {
+  const orig =
+    req.body.origen_carga ??
+    req.body.origenCarga ??
+    undefined;
+  return {
+    codigo_centro_costo,
+    usuario_alta,
+    temperatura: req.body.temperatura ?? req.body.temp,
+    fecha_medicion:
+      req.body.fecha_medicion ??
+      req.body.fecha_archivo ??
+      req.body.fecha,
+    humedad_relativa_pct: req.body.humedad_relativa_pct,
+    punto_condensacion_c: req.body.punto_condensacion_c,
+    origen_carga: orig,
+  };
+}
+
+/** @deprecated usar POST /carga con JSON o form sin archivo — se mantiene por compatibilidad */
+router.post("/carga-manual", (req, res) => {
+  const usuario_alta = usuarioDesdeCabeceras(req);
+  const codigo_centro_costo =
+    req.body.codigo_centro_costo ??
+    req.body.codigoCentroCosto ??
+    req.body.rancho_codigo ??
+    "";
+  cargaCtrl
+    .guardarCapturaManual(opcionesManualDesdeBody(req, usuario_alta, codigo_centro_costo))
+    .then((result) => res.status(201).json(result))
+    .catch((err) => handleCatch(err, res));
+});
+
 router.post(
   "/carga",
   uploadMem.single("archivo"),
   (req, res) => {
-    if (!req.file || !req.file.buffer) {
-      return res.status(400).json({
-        success: false,
-        error: "Debe adjuntar el archivo en el campo 'archivo' (form-data)",
-      });
-    }
-
     const usuario_alta = usuarioDesdeCabeceras(req);
     const codigo_centro_costo =
       req.body.codigo_centro_costo ??
@@ -55,24 +87,51 @@ router.post(
       req.body.rancho_codigo ??
       "";
 
-    const rawRep =
-      req.body.reemplazar_si_duplicado ??
-      req.body.reemplazarSiDuplicado ??
-      "";
-    const reemplazar_si_duplicado =
-      rawRep === true ||
-      rawRep === 1 ||
-      String(rawRep).toLowerCase() === "true" ||
-      String(rawRep) === "1";
+    if (req.file && req.file.buffer) {
+      const rawRep =
+        req.body.reemplazar_si_duplicado ??
+        req.body.reemplazarSiDuplicado ??
+        "";
+      const origenRaw =
+        req.body.origen_carga ?? req.body.origenCarga ?? undefined;
 
-    cargaCtrl
-      .procesarCargaArchivo({
-        buffer: req.file.buffer,
-        originalname: req.file.originalname || "archivo.xlsx",
-        codigo_centro_costo,
-        usuario_alta,
-        reemplazar_si_duplicado,
-      })
+      const reemplazar_si_duplicado =
+        rawRep === true ||
+        rawRep === 1 ||
+        String(rawRep).toLowerCase() === "true" ||
+        String(rawRep) === "1";
+
+      return cargaCtrl
+        .procesarCargaArchivo({
+          buffer: req.file.buffer,
+          originalname: req.file.originalname || "archivo.xlsx",
+          codigo_centro_costo,
+          usuario_alta,
+          reemplazar_si_duplicado,
+          origen_carga: origenRaw,
+        })
+        .then((result) => res.status(201).json(result))
+        .catch((err) => handleCatch(err, res));
+    }
+
+    /* Misma URL que Excel: sin archivo pero con datos de lectura → captura manual */
+    const tempRaw = req.body.temperatura ?? req.body.temp;
+    const tieneTemperatura =
+      tempRaw != null && String(tempRaw).trim() !== "";
+
+    if (!tieneTemperatura) {
+      return res.status(400).json({
+        success: false,
+        error:
+          "Debe adjuntar el archivo en el campo 'archivo' (form-data multipart) " +
+          "o enviar captura en el mismo endpoint con campo 'temperatura' numérico y código de centro.",
+      });
+    }
+
+    return cargaCtrl
+      .guardarCapturaManual(
+        opcionesManualDesdeBody(req, usuario_alta, codigo_centro_costo),
+      )
       .then((result) => res.status(201).json(result))
       .catch((err) => handleCatch(err, res));
   }

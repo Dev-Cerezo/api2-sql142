@@ -2,6 +2,10 @@
  * API REST (viáticos, altadrive, login, registro chofer, cosecha aguacate).
  * Login idéntico a api-sql142/routes/login.routes.js montado en /api/login.
  * Front HTML/JS: proyecto hermano aguacateTemperatura (puerto por defecto 3004).
+ *
+ * Cosecha: por defecto usa tabla corta; INSERT incluye origen_carga=E/M si la columna existe.
+ * Sin columna origen_carga en BD antigua: COSECHA_TABLA_SIN_ORIGEN_CARGA=1. Modo Excel con hash:
+ * COSECHA_TABLA_COMPLETA=1 — ver cosechaModoTabla.js.
  */
 const express = require("express");
 const cors = require("cors");
@@ -33,8 +37,7 @@ app.use("/api/altadrive", altadriveRoutes);
 app.use("/api/registro-chofer", registroChoferRoutes);
 app.use("/api/cosecha-aguacate", cosechaAguacateRoutes);
 
-app.get("/api/health", (req, res) => {
-  res.json({ ok: true, service: "api2-sql142-viaticos" });
+app.get("/api/health", (req, res) => {  res.json({ ok: true, service: "api2-sql142-viaticos" });
 });
 
 app.use((err, req, res, next) => {
