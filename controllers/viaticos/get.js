@@ -150,6 +150,7 @@ const getViaticosConfirmacion = async (req, res) => {
                 v.id_solicitud,
                 v.folio,
                 v.fecha_creacion AS fecha,
+                v.tipo_flujo,
                 v.motivo,
                 v.destino,
                 v.estatus_general,

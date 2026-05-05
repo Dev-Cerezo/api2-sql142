@@ -47,7 +47,6 @@ const addSolicitudViaticos = async (req, res) => {
       .input("tipo_flujo", sql.VarChar(20), req.tipo_flujo)
       .input("destino", sql.NVarChar(150), req.destino)
       .input("fecha_nacimiento", sql.Date, req.fecha_nacimiento)
-      .input("num_personas", sql.Int, vEmp.numPersonas)
       .input("num_dias", sql.Int, req.num_dias || 1)
       .input("monto_solicitado", sql.Decimal(18, 2), req.monto_solicitado)
       .input("cuenta_bancaria", sql.NVarChar(30), req.cuenta_bancaria)
@@ -57,11 +56,11 @@ const addSolicitudViaticos = async (req, res) => {
       .input("nums_empleados_viatico", sql.NVarChar(500), vEmp.normalizado)
       .query(`
                 INSERT INTO tb_wap_Soliviaticos_reg_01 
-                (id_usuario, tipo_flujo, destino, fecha_nacimiento, num_personas, num_dias, 
+                (id_usuario, tipo_flujo, destino, fecha_nacimiento, num_dias, 
                  monto_solicitado, cuenta_bancaria, motivo, estatus_general, 
                  valida_compras, valida_cxp, fecha_creacion, fecha_actualizacion, usuario_actualizacion, nums_empleados_viatico)
                 VALUES 
-                (@id_usuario, @tipo_flujo, @destino, @fecha_nacimiento, @num_personas, @num_dias, 
+                (@id_usuario, @tipo_flujo, @destino, @fecha_nacimiento, @num_dias, 
                  @monto_solicitado, @cuenta_bancaria, @motivo, 1, 
                  @valida_compras, 'Pendiente', GETDATE(), GETDATE(), @usuario_actualizacion, @nums_empleados_viatico);
                 

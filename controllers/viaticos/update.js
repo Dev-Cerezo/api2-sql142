@@ -4,6 +4,23 @@ const config = require("../../dbconfig");
 const vincularDrive = async (req) => {
   try {
     const pool = await sql.connect(config);
+    /** Firma gerente u otra evidencia adicional: nueva fila (no pisar carpeta/expediente). */
+    if (req.tipo_evidencia === "FIRMA_GERENTE_VISITA") {
+      const ins = await pool
+        .request()
+        .input("id_solicitud", sql.Int, req.id_solicitud)
+        .input("id_drive", sql.VarChar(255), req.id_drive)
+        .query(`
+                INSERT INTO tb_wap_Solicviaticos_Evidencias (id_solicitud, nombre_archivo, fecha_subida)
+                VALUES (@id_solicitud, @id_drive, GETDATE());
+            `);
+      return {
+        status: "success",
+        message: "Firma vinculada al expediente (nueva evidencia).",
+        rowsAffected: ins.rowsAffected[0],
+      };
+    }
+
     const result = await pool
       .request()
       .input("id_solicitud", sql.Int, req.id_solicitud)
@@ -76,21 +93,35 @@ const updateEstatusOperativo = async (req) => {
     const pool = await sql.connect(config);
 
     if (departamento === "GERENTE" && Number(estatus_nuevo) === 6) {
-      await pool
+      const comTxt =
+        comentario == null
+          ? null
+          : String(comentario).trim() === ""
+            ? null
+            : String(comentario).trim().slice(0, 500);
+      const resultGerente = await pool
         .request()
         .input("id", sql.Int, id_solicitud)
         .input("usuario", sql.Int, usuario_actualizacion)
-        .input("comentario", sql.VarChar(500), comentario || null)
+        .input("comentario", sql.VarChar(500), comTxt)
         .query(
           `
                     UPDATE tb_wap_Soliviaticos_reg_01
                     SET estatus_general = 6,
-                        comentario_jefe = ISNULL(@comentario, comentario_jefe),
+                        comentario_jefe = COALESCE(@comentario, comentario_jefe),
                         fecha_actualizacion = GETDATE(),
                         usuario_actualizacion = @usuario
-                    WHERE id_solicitud = @id
+                    WHERE id_solicitud = @id AND estatus_general = 5
                 `
         );
+
+      if (resultGerente.rowsAffected[0] === 0) {
+        const e = new Error(
+          "No se actualizó el registro: verifique que el folio exista y esté en estatus 5 (pendiente de firma de gerente)."
+        );
+        e.statusCode = 409;
+        throw e;
+      }
 
       return {
         status: "success",

@@ -1,8 +1,11 @@
 const express = require("express");
 const router = express.Router();
+const viaticosAuthMiddleware = require("../controllers/middlaware/viaticosAuthMiddleware");
 const saveviaticos = require("../controllers/viaticos/save");
 const vincularDrive = require("../controllers/viaticos/update");
 const getviaticos = require("../controllers/viaticos/get");
+
+router.use(viaticosAuthMiddleware);
 
 router.route("/addviaticos").post((request, response) => {
   let params = { ...request.body };
@@ -38,7 +41,10 @@ router.route("/updateEstatusOperativo").put((request, response) => {
     .then((result) => {
       response.status(200).json(result);
     })
-    .catch((e) => response.status(500).json({ error: e.message }));
+    .catch((e) => {
+      const code = e.statusCode || 500;
+      response.status(code).json({ error: e.message });
+    });
 });
 
 router.route("/getviaticos").post((request, response) => {
