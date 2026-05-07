@@ -4,13 +4,10 @@ const path = require('path');
 const mime = require('mime-types'); // Importa la librería mime-types
 
 const dotenv = require('dotenv');
-var environment = process.env.NODE_ENV || 'development'; // Obtiene la variable de entorno NODE_ENV, si no existe, usa 'development' por defecto
-if (environment == "test ") {
-  environment = "test"
-}
+const environment = (process.env.NODE_ENV || 'development').trim();
 
-const result = dotenv.config({
-  path: `.env.${environment}` // Carga el archivo .env.[entorno] (ej: .env.development o .env.test)
+dotenv.config({
+  path: path.join(__dirname, `.env.${environment}`),
 });
 
 
@@ -134,6 +131,37 @@ async function uploadFile2(filePath, folderId) {
   }
 }
 
+/**
+ * Hace el archivo visible con "Cualquiera con el enlace" (lector).
+ * Necesario para mostrar la firma en <img src="https://drive.google.com/uc?export=view&id=...">.
+ * Si la organización bloquea enlaces públicos, el permiso fallará y solo se registrará en log.
+ */
+async function makeFilePublicAnyoneRead(fileId) {
+  if (!fileId) return;
+  try {
+    await drive.permissions.create({
+      fileId,
+      requestBody: {
+        type: 'anyone',
+        role: 'reader',
+        allowFileDiscovery: false,
+      },
+      supportsAllDrives: true,
+    });
+    console.log('🔓 Permiso público (lector) aplicado al archivo:', fileId);
+  } catch (error) {
+    const msg = String(error.message || error);
+    if (
+      msg.includes('already exists') ||
+      msg.includes('Duplicate') ||
+      error.code === 409
+    ) {
+      return;
+    }
+    console.warn('⚠️ No se pudo aplicar permiso público al archivo (p. ej. política Workspace):', fileId, msg);
+  }
+}
+
 // Función para crear una carpeta en Google Drive
 async function createFolder(folderName, parentFolderId) {
   try {
@@ -154,4 +182,4 @@ async function createFolder(folderName, parentFolderId) {
 
 
 
-module.exports = { uploadFile, createFolder, createFolderext, uploadFile2  };
+module.exports = { uploadFile, createFolder, createFolderext, uploadFile2, makeFilePublicAnyoneRead };
