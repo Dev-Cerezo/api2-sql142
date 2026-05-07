@@ -30,25 +30,46 @@ function looksLikeDriveFileId(s) {
   return /^[a-zA-Z0-9_-]{20,}$/.test(t);
 }
 
-let logosMapCache = null;
+/** { mtime, map } para recargar logos.json si cambia en disco */
+let logosMapState = { mtime: -1, map: null };
 
 function readLogosMap(dir) {
-  if (logosMapCache) return logosMapCache;
-  logosMapCache = {};
+  const p = path.join(dir, "logos.json");
+  let mtime = -1;
   try {
-    const p = path.join(dir, "logos.json");
-    if (fs.existsSync(p)) {
-      const j = JSON.parse(fs.readFileSync(p, "utf8"));
-      if (j && typeof j === "object") {
-        Object.keys(j).forEach((k) => {
-          logosMapCache[k.trim()] = String(j[k] || "").trim();
-        });
-      }
+    mtime = fs.statSync(p).mtimeMs;
+  } catch (_e) {
+    return {};
+  }
+  if (logosMapState.map != null && logosMapState.mtime === mtime) {
+    return logosMapState.map;
+  }
+  const map = {};
+  try {
+    const j = JSON.parse(fs.readFileSync(p, "utf8"));
+    if (j && typeof j === "object") {
+      Object.keys(j).forEach((k) => {
+        map[k.trim()] = String(j[k] || "").trim();
+      });
     }
   } catch (_e) {
-    logosMapCache = {};
+    /* vacío */
   }
-  return logosMapCache;
+  logosMapState = { mtime, map };
+  return map;
+}
+
+/** Valor en logos.json por clave exacta o misma razón social sin distinguir mayúsculas */
+function mapFileForEmpresa(map, empresa) {
+  if (!empresa) return null;
+  const e = String(empresa).trim();
+  if (map[e]) return map[e];
+  const el = e.toLowerCase();
+  const keys = Object.keys(map);
+  for (let i = 0; i < keys.length; i++) {
+    if (keys[i].trim().toLowerCase() === el) return map[keys[i]];
+  }
+  return null;
 }
 
 function slugify(s) {
@@ -94,13 +115,18 @@ function loadLocalLogoFile(filePath) {
  * - logos.json: { "Razón social igual que getEmpresasReq": "archivo.png" }
  * - Si logo_url del API no parece id de Drive, se usa como nombre de archivo en esta carpeta
  * - {slugify(proveedor)}.png (o .jpg, …)
+ * - extra.nombreProveedor: nombre comercial distinto (slug adicional, mapa sin distinguir mayúsculas)
  */
-function resolveLocalLogoDataUriSync(proveedor, row) {
+function resolveLocalLogoDataUriSync(proveedor, row, extra) {
   const dir = logosDir();
   if (!fs.existsSync(dir)) return null;
 
   const map = readLogosMap(dir);
   const orderedPaths = [];
+  const np =
+    extra && (extra.nombreProveedor || extra.NombreProveedor)
+      ? String(extra.nombreProveedor || extra.NombreProveedor).trim()
+      : "";
 
   if (row && row.logo_url) {
     const lu = String(row.logo_url).trim();
@@ -109,16 +135,24 @@ function resolveLocalLogoDataUriSync(proveedor, row) {
     }
   }
 
-  if (proveedor && map[proveedor]) {
-    orderedPaths.push(path.join(dir, map[proveedor]));
+  const fp = mapFileForEmpresa(map, proveedor);
+  if (proveedor && fp) orderedPaths.push(path.join(dir, fp));
+  if (row && row.empresa) {
+    const fe = mapFileForEmpresa(map, row.empresa);
+    if (fe) orderedPaths.push(path.join(dir, fe));
   }
-  if (row && row.empresa && map[row.empresa]) {
-    orderedPaths.push(path.join(dir, map[row.empresa]));
+  if (np) {
+    const fnp = mapFileForEmpresa(map, np);
+    if (fnp) orderedPaths.push(path.join(dir, fnp));
   }
 
   const slug = proveedor ? slugify(proveedor) : "";
   if (slug) {
     orderedPaths.push(path.join(dir, slug));
+  }
+  if (np) {
+    const snp = slugify(np);
+    if (snp && snp !== slug) orderedPaths.push(path.join(dir, snp));
   }
 
   for (let i = 0; i < orderedPaths.length; i++) {
@@ -312,7 +346,17 @@ async function getEmpresaRowForProveedor(proveedor) {
   if (!proveedor) return null;
   const list = await httpsGetJson(GET_EMPRESAS_URL);
   if (!Array.isArray(list)) return null;
-  return list.find((item) => item && item.empresa === proveedor) || null;
+  const needle = String(proveedor).trim();
+  let row = list.find((item) => item && item.empresa === needle);
+  if (!row) {
+    const nl = needle.toLowerCase();
+    row =
+      list.find(
+        (item) =>
+          item && String(item.empresa || "").trim().toLowerCase() === nl
+      ) || null;
+  }
+  return row;
 }
 
 async function getLogoDriveIdForProveedor(proveedor) {
@@ -355,7 +399,9 @@ async function generateRequisicionCompraPdfBuffer(datos, opts) {
 
     let embedded = null;
     if (process.env.REQUIS_LOGOS_USE_LOCAL !== "0") {
-      embedded = resolveLocalLogoDataUriSync(d.proveedor, row);
+      embedded = resolveLocalLogoDataUriSync(d.proveedor, row, {
+        nombreProveedor: d.NombreProveedor || d.nombreProveedor,
+      });
     }
 
     let logoId = String(d.logoDriveId || "").trim();
@@ -415,5 +461,6 @@ module.exports = {
   buildRequisicionCompraHtml,
   downloadDriveFileIdAsDataUri,
   resolveLocalLogoDataUriSync,
+  mapFileForEmpresa,
   logosDir,
 };

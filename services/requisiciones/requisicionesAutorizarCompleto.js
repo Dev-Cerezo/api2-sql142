@@ -1,8 +1,8 @@
+const https = require("https");
 const { postJson, joinBase, firstRow } = require("./greenfieldClient");
 const { generateRequisicionCompraPdfBuffer } = require("./requisicionCompraPdf");
 const { uploadPdfBufferToDrive } = require("./requisDriveUploadPdf");
 const {
-  emailsFromGetCorreosPayload,
   sendAutorizadoEmail,
   smtpConfigured,
 } = require("./requisAutorizarEmail");
@@ -11,8 +11,28 @@ const GF_BASE = (
   process.env.REQUIS_GREENFIELD_BASE_URL || "https://api2.greenfieldmf.com/api"
 ).trim();
 
+const USUARIO_API_BASE = (
+  process.env.REQUIS_USUARIO_API_BASE || "https://api2.gaecti.com/api"
+).trim();
+
 function statusCorrecto(json) {
   return json && String(json.status || "").toUpperCase() === "CORRECTO";
+}
+
+/** Destinatarios únicos para correo (solo correos con @). */
+function uniqueEmailList(...addresses) {
+  const seen = new Set();
+  const out = [];
+  for (let i = 0; i < addresses.length; i++) {
+    const v = String(addresses[i] || "")
+      .trim()
+      .toLowerCase();
+    if (!v || v.indexOf("@") < 0) continue;
+    if (seen.has(v)) continue;
+    seen.add(v);
+    out.push(v);
+  }
+  return out;
 }
 
 function mapLineasToPdfDetalle(lineas) {
@@ -89,6 +109,57 @@ async function fetchFnComentarios(idReq) {
   return "";
 }
 
+function httpsGetText(urlStr) {
+  return new Promise((resolve) => {
+    try {
+      const r = https.get(urlStr, (res) => {
+        let b = "";
+        res.on("data", (c) => {
+          b += c;
+        });
+        res.on("end", () => {
+          resolve({ status: res.statusCode || 0, body: b });
+        });
+      });
+      r.on("error", () => resolve({ status: 0, body: "" }));
+      r.setTimeout(12000, () => {
+        r.destroy();
+        resolve({ status: 0, body: "" });
+      });
+    } catch (_e) {
+      resolve({ status: 0, body: "" });
+    }
+  });
+}
+
+/**
+ * Nombre legible de quien autoriza (misma API que requis_taller/auth getUsuario).
+ */
+async function fetchNombreCompletoAutorizador(email) {
+  const em = String(email || "").trim();
+  if (!em || em.indexOf("@") < 0) return "";
+  const base = USUARIO_API_BASE.replace(/\/$/, "");
+  const url = `${base}/getUsuario/${encodeURIComponent(em)}`;
+  const { status, body } = await httpsGetText(url);
+  if (status !== 200 || !body) return "";
+  let raw;
+  try {
+    raw = JSON.parse(body);
+  } catch (_e) {
+    return "";
+  }
+  let row = raw;
+  if (Array.isArray(raw)) {
+    if (raw.length && Array.isArray(raw[0])) row = raw[0][0];
+    else row = raw[0];
+  }
+  if (!row || typeof row !== "object") return "";
+  const nom = String(row.nombre ?? row.Nombre ?? "").trim();
+  const ape = String(row.apellidos ?? row.Apellidos ?? "").trim();
+  const full = `${nom} ${ape}`.trim();
+  return full || nom || ape;
+}
+
 async function callFnFasesAuto(idReq) {
   const url = joinBase(GF_BASE, "/fnFasesAuto/");
   const out = await postJson(url, { id_requisicion: String(idReq) });
@@ -97,18 +168,6 @@ async function callFnFasesAuto(idReq) {
   const f = j.datos.faltan_autorizar;
   const n = typeof f === "string" ? parseInt(f, 10) : Number(f);
   return { ok: true, faltan: Number.isNaN(n) ? 0 : n, raw: j };
-}
-
-async function callGetCorreos(opt, idReq, tipo) {
-  const url = joinBase(GF_BASE, "/getCorreos/");
-  const body = {
-    opt: String(opt),
-    id: String(idReq),
-    tipo: tipo != null && tipo !== "" ? String(tipo) : "",
-    sucursal: "",
-  };
-  const out = await postJson(url, body);
-  return out.json;
 }
 
 async function autorizarCompleto(body) {
@@ -124,8 +183,6 @@ async function autorizarCompleto(body) {
   }
 
   const usuario = String(body.usuario || "").trim();
-  const nombreUsuario =
-    String(body.nombre_usuario || body.usuario || "").trim() || usuario;
 
   const montoEst = req.monto_estimado != null ? String(req.monto_estimado) : "0";
   const montoReal = req.monto_real != null ? String(req.monto_real) : "0";
@@ -187,13 +244,11 @@ async function autorizarCompleto(body) {
     const mailSkip = process.env.REQUIS_MAIL_SKIP === "1";
     if (!mailSkip && smtpConfigured()) {
       try {
-        const dest = emailsFromGetCorreosPayload(
-          await callGetCorreos("X", idReq, req.id_tipo_compra || "")
-        );
-        if (dest) {
+        const toList = uniqueEmailList(req.usuario_sol, usuario);
+        if (toList.length) {
           await sendAutorizadoEmail({
-            to: dest,
-            cc: "",
+            to: toList.join(", "),
+            cc: undefined,
             subject: `SOLICITUD PENDIENTE DE AUTORIZACION(ES) Requisición: ${idReq}`,
             html: `<p>Faltan autorizaciones (${fases.faltan}). Requisición ${idReq}.</p>`,
           });
@@ -225,11 +280,18 @@ async function autorizarCompleto(body) {
       ? centroDes
       : ceco.display || String(req.centro_costos || "");
 
+  const nombreAutorizadorApi = await fetchNombreCompletoAutorizador(usuario);
+  const nombreUsuario =
+    (nombreAutorizadorApi && nombreAutorizadorApi.trim()) ||
+    String(body.nombre_usuario || "").trim() ||
+    (usuario.indexOf("@") >= 0 ? usuario.split("@")[0] : usuario);
+
   const pdfDatos = {
     fecha: String(req.fecha || "").slice(0, 10),
     sucursal,
     id_requisicion: idReq,
     proveedor: String(req.proveedor || req.NombreProveedor || ""),
+    NombreProveedor: String(req.NombreProveedor || req.proveedor || ""),
     centro_costos_display: centroDisplay,
     uso: String(req.uso || ""),
     des_tipo_compra: desTipo || String(req.des_tipo_compra || ""),
@@ -261,9 +323,26 @@ async function autorizarCompleto(body) {
   const skipDrive = process.env.REQUIS_SKIP_DRIVE_UPLOAD === "1";
   if (!skipDrive) {
     try {
-      driveFileId = await uploadPdfBufferToDrive(pdfBuf, pdfName);
+      driveFileId = await uploadPdfBufferToDrive(pdfBuf, pdfName, {
+        idRequisicion: idReq,
+        creadoPorNombre: nombreUsuario,
+        creadoPorEmail: usuario,
+        nombreSolicitante: String(req.nombre_sol || ""),
+      });
     } catch (e) {
-      console.warn("[autorizarCompleto] Drive upload:", e.message);
+      const extra =
+        e &&
+        e.response &&
+        e.response.data &&
+        typeof e.response.data === "object"
+          ? " " + JSON.stringify(e.response.data)
+          : "";
+      console.warn("[autorizarCompleto] Drive upload:", e.message || e, extra);
+    }
+    if (!driveFileId) {
+      console.warn(
+        "[autorizarCompleto] Sin id de archivo en Drive → no se llama insertaRuta; la columna Documento seguirá en PENDIENTE."
+      );
     }
   }
 
@@ -289,16 +368,8 @@ async function autorizarCompleto(body) {
   let emailSent = false;
   if (!mailSkip && smtpConfigured()) {
     try {
-      const dest6 = emailsFromGetCorreosPayload(
-        await callGetCorreos("6", idReq, sucursal)
-      );
-      const usuarioSol = emailsFromGetCorreosPayload(
-        await callGetCorreos("4", idReq, "")
-      );
-      const ccPart = [usuarioSol, "compras.matriz@grupoelcerezo.com"]
-        .filter(Boolean)
-        .join(", ");
-      if (dest6) {
+      const toList = uniqueEmailList(req.usuario_sol, usuario);
+      if (toList.length) {
         const attachPdf =
           process.env.REQUIS_EMAIL_ATTACH_PDF !== "0";
         const attachments = attachPdf
@@ -311,8 +382,8 @@ async function autorizarCompleto(body) {
             ]
           : undefined;
         await sendAutorizadoEmail({
-          to: dest6,
-          cc: ccPart,
+          to: toList.join(", "),
+          cc: undefined,
           subject: `REQUISICIÓN DE COMPRA Requisición: ${idReq}`,
           html: `<p>Requisición <strong>${idReq}</strong> autorizada.</p>
             <p>Se adjunta el PDF de la requisición.</p>
@@ -340,22 +411,40 @@ async function autorizarCompleto(body) {
   let mensajeOk = "REQUISICION AUTORIZADA.";
   if (driveFileId) {
     mensajeOk =
-      "REQUISICION AUTORIZADA (PDF en Drive, insertaRuta y correo según configuración).";
-  } else if (emailSent) {
+      "REQUISICION AUTORIZADA. PDF subido a Drive y guardado el id (insertaRuta) para la columna Documento.";
+  } else if (skipDrive) {
     mensajeOk =
-      "REQUISICION AUTORIZADA. PDF enviado por correo como adjunto.";
-  } else if (!smtpConfigured() || mailSkip) {
-    mensajeOk +=
-      " Configura SMTP_USER y SMTP_PASS (igual que en api-sql142) en el .env de api2-sql142 para enviar el PDF por correo.";
+      "REQUISICION AUTORIZADA. Drive desactivado (REQUIS_SKIP_DRIVE_UPLOAD=1): no se guarda id en el listado.";
+    if (emailSent) mensajeOk += " Se envió copia por correo.";
+    else if (!smtpConfigured() || mailSkip) {
+      mensajeOk += " Sin SMTP configurado no hay adjunto por correo.";
+    } else {
+      mensajeOk +=
+        " No hay correos válidos para enviar (usuario_sol / usuario autorizador).";
+    }
   } else {
-    mensajeOk +=
-      " No se obtuvieron destinatarios (getCorreos 6); revisa la requisición o el API.";
+    mensajeOk =
+      "REQUISICION AUTORIZADA.\n\n" +
+      "ADVERTENCIA: no se subió el PDF a Drive ni se guardó el id. En el índice seguirá PENDIENTE en Documento.\n\n" +
+      "Revisa en el servidor api2-sql142: REQUIS_DRIVE_FOLDER_ID; los mismos ACCESS_TOKEN y REFRESH_TOKEN que usa viáticos; credentials.json en la raíz de api2-sql142; " +
+      "y que la carpeta esté en el Drive de ese usuario o compartida con él como editor. Alternativa: GOOGLE_APPLICATION_CREDENTIALS (cuenta de servicio). Ver log [requisDriveUploadPdf].";
+    if (emailSent) {
+      mensajeOk +=
+        "\n\nSe envió el PDF por correo como adjunto (solo copia, no actualiza la BD).";
+    } else if (!smtpConfigured() || mailSkip) {
+      mensajeOk += "\n\nSin SMTP no se mandó correo con el PDF.";
+    } else {
+      mensajeOk +=
+        "\n\nNo hay correos válidos en usuario_sol / usuario del autorizador.";
+    }
   }
 
   return {
     status: "OK",
     mensaje: mensajeOk,
     pdfDriveId: driveFileId || undefined,
+    driveSubido: Boolean(driveFileId),
+    driveUploadOmitidoPorEnv: skipDrive,
     insertaRuta: inserta,
     emailEnviado: emailSent,
   };

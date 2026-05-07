@@ -1,7 +1,16 @@
 const { google } = require('googleapis');
 const fs = require('fs');
 const path = require('path');
+const { PassThrough } = require('stream');
 const mime = require('mime-types'); // Importa la librería mime-types
+
+/** Node 22+: Readable.from(buffer) puede emitir bytes sueltos; Drive/googleapis espera Buffers. */
+function pdfBufferToReadable(buffer) {
+  const b = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer);
+  const pt = new PassThrough();
+  pt.end(b);
+  return pt;
+}
 
 const dotenv = require('dotenv');
 const environment = (process.env.NODE_ENV || 'development').trim();
@@ -121,6 +130,7 @@ async function uploadFile2(filePath, folderId) {
         mimeType: detectedMimeType, // Usa el tipo MIME detectado, no forzado
         body: fs.createReadStream(filePath),
       },
+      supportsAllDrives: true,
     });
 
     console.log('✅ Archivo en Drive:', response.data.name);
@@ -162,24 +172,40 @@ async function makeFilePublicAnyoneRead(fileId) {
   }
 }
 
-// Función para crear una carpeta en Google Drive
-async function createFolder(folderName, parentFolderId) {
-  try {
-    const response = await drive.files.create({
-      requestBody: {
-        name: folderName, // Nombre de la carpeta
-        mimeType: 'application/vnd.google-apps.folder', // Tipo MIME para carpetas
-        parents: parentFolderId ? [parentFolderId] : [], // ID de la carpeta padre (opcional)
-      },
-    });
-
-    return response.data.id; // Devuelve el ID de la carpeta creada
-  } catch (error) {
-    console.error('Error al crear la carpeta:', error);
-    throw error;
+/**
+ * Mismo cliente OAuth que uploadFile2 / viáticos — sube PDF desde buffer (requisiciones).
+ */
+async function uploadPdfBufferToDriveFolder(buffer, fileName, folderId, description) {
+  const stream = pdfBufferToReadable(buffer);
+  const requestBody = {
+    name: fileName,
+    parents: [folderId],
+  };
+  if (description) {
+    requestBody.description = String(description).slice(0, 32000);
   }
+  const response = await drive.files.create({
+    requestBody,
+    media: {
+      mimeType: 'application/pdf',
+      body: stream,
+    },
+    fields: 'id,name',
+    supportsAllDrives: true,
+  });
+  const id = response.data && response.data.id;
+  if (id) {
+    console.log('✅ PDF requisición en Drive:', fileName, id);
+  }
+  return id || null;
 }
 
 
-
-module.exports = { uploadFile, createFolder, createFolderext, uploadFile2, makeFilePublicAnyoneRead };
+module.exports = {
+  uploadFile,
+  createFolder,
+  createFolderext,
+  uploadFile2,
+  makeFilePublicAnyoneRead,
+  uploadPdfBufferToDriveFolder,
+};

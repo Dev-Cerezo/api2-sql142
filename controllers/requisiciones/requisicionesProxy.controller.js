@@ -53,7 +53,6 @@ function postJsonWithFollow(urlStr, payload, maxRedirects) {
 }
 
 async function proxyAutorizar(req, res) {
-  console.log( process.env.REQUIS_AUTORIZAR_GAS_URL, process.env.REQUIS_AUTORIZAR_SECRET )
   const key = process.env.REQUIS_AUTORIZAR_PROXY_KEY;
   if (key && req.headers["x-requis-autorizar-key"] !== key) {
     return res.status(403).json({

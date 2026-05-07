@@ -11,16 +11,14 @@
  * Retrocompatibilidad (solo api2): REQUIS_SMTP_HOST, REQUIS_SMTP_PORT, REQUIS_SMTP_USER, REQUIS_SMTP_PASS, REQUIS_SMTP_FROM.
  *
  * Otras:
- *   REQUIS_MAIL_BCC — BCC (por defecto jtarelo@…)
+ *   REQUIS_MAIL_BCC — copia oculta opcional (si está vacío, no hay BCC)
  *   REQUIS_MAIL_SKIP=1 — no enviar correos
- *   REQUIS_SKIP_DRIVE_UPLOAD=1 — sin subir PDF a Drive
+ *   REQUIS_SKIP_DRIVE_UPLOAD=1 — sin Drive ni insertaRuta (PDF solo por correo si aplica)
  *   REQUIS_EMAIL_ATTACH_PDF=0 — correo sin adjunto PDF
  */
 const nodemailer = require("nodemailer");
 
 function smtpUser() {
-
-  console.log(process.env.SMTP_USER, process.env.SMTP_PASS)
   return (process.env.SMTP_USER || process.env.REQUIS_SMTP_USER || "").trim();
 }
 
@@ -103,16 +101,18 @@ async function sendAutorizadoEmail({ to, cc, subject, html, attachments }) {
 
   const transporter = createTransporter();
   const from = defaultFrom();
-  const bcc = (process.env.REQUIS_MAIL_BCC || "jtarelo@grupoelcerezo.com").trim();
 
   const mail = {
     from,
     to,
     cc: cc || undefined,
-    bcc: bcc || undefined,
     subject,
     html,
   };
+  const bcc = (process.env.REQUIS_MAIL_BCC || "").trim();
+  if (bcc) {
+    mail.bcc = bcc;
+  }
   if (attachments && attachments.length) {
     mail.attachments = attachments;
   }
