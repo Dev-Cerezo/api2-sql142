@@ -3,8 +3,11 @@ const multer = require("multer");
 const cargaCtrl = require("../controllers/cosechaAguacate/carga");
 const reportesCtrl = require("../controllers/cosechaAguacate/reportes");
 const { usuarioDesdeCabeceras } = require("../controllers/cosechaAguacate/authUsuario");
+const cosechaAuthMiddleware = require("../controllers/middlaware/cosechaAuthMiddleware");
 
 const router = express.Router();
+
+router.use(cosechaAuthMiddleware);
 
 const uploadMem = multer({
   storage: multer.memoryStorage(),

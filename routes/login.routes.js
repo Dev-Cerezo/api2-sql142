@@ -8,6 +8,9 @@ const authMiddleware = require('../controllers/middlaware/middlaware'); // Impor
 // Ruta de Login JWT
 router.post('/loginT', authController.loginUsuario);
 
+// Login JWT para aguacateTemperatura (POST; credenciales en cuerpo, no en URL)
+router.post('/loginAguacate', authController.loginAguacateTemperatura);
+
 // Rutas protegidas (Requieren token)
 // Ejemplo: Obtener perfil o datos sensibles
 router.get('/perfilT', authMiddleware, (req, res) => {

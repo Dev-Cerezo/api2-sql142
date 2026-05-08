@@ -1,12 +1,11 @@
 /**
- * Cabeceras de usuario para rutas Cosecha Aguacate (sesión cliente → X-Usuario).
+ * Usuario efectivo tras auth JWT en rutas cosecha-aguacate (Bearer).
  */
 function usuarioDesdeCabeceras(req) {
-  const raw =
-    req.headers["x-usuario"] ||
-    req.headers["x-login-usuario"] ||
-    "";
-  return String(raw).trim();
+  if (req.cosechaUser && req.cosechaUser.email) {
+    return String(req.cosechaUser.email).trim();
+  }
+  return "";
 }
 
 module.exports = {

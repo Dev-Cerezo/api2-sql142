@@ -90,6 +90,102 @@ async function loginUsuario(req, res) {
     }
 }
 
+/**
+ * Login para herramienta aguacateTemperatura: valida tabla `usuarios` + roles,
+ * igual que GET getusuarioExiste (sin exponer contraseña en URL). Emite JWT requerido por /api/cosecha-aguacate/*.
+ */
+const ROLES_AGUACATE_APP = ["AGUACATE", "ADMIN", "ADMCOSECHAAGUACATE"];
+
+function filaAguautorizada(rows) {
+  if (!rows || !Array.isArray(rows) || rows.length === 0) {
+    return null;
+  }
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    const r = (row && row.roles) ? String(row.roles).toUpperCase() : "";
+    const ok = ROLES_AGUACATE_APP.some(function (nombreRol) {
+      return r.indexOf(nombreRol) !== -1;
+    });
+    if (ok) {
+      return row;
+    }
+  }
+  return null;
+}
+
+async function loginAguacateTemperatura(req, res) {
+  const emailRaw = req.body != null ? (req.body.email || req.body.usuario) : "";
+  const passRaw = req.body != null ? (req.body.pass || req.body.password) : "";
+  const email = String(emailRaw || "").trim();
+  const pass = passRaw != null ? String(passRaw) : "";
+
+  if (!email || !pass) {
+    return res.status(400).json({
+      success: false,
+      mensaje: "Email y contraseña son requeridos",
+    });
+  }
+
+  try {
+    const recordsets = await getUsuariosExistente({ email, pass });
+    if (!recordsets || recordsets.status === "ERROR") {
+      return res.status(500).json({
+        success: false,
+        mensaje:
+          (recordsets && recordsets.mensaje) ||
+          "Error al validar credenciales",
+      });
+    }
+    const rows = recordsets[0];
+    if (!Array.isArray(rows) || rows.length === 0) {
+      return res.status(401).json({
+        success: false,
+        mensaje: "Usuario o contraseña incorrectos",
+      });
+    }
+    const fila = filaAguautorizada(rows);
+    if (!fila) {
+      return res.status(403).json({
+        success: false,
+        mensaje:
+          "Su usuario no tiene permiso para esta aplicación. Solicite el rol AGUACATE o equivalente al departamento de TI.",
+      });
+    }
+
+    const expiracion = process.env.JWT_EXPIRES_IN || "8h";
+    const secret = process.env.JWT_PASSWORD_SECRET || "TuFirmaSecreta";
+
+    const token = jwt.sign(
+      {
+        purpose: "aguacate_temp",
+        id_usuario: fila.id_usuario,
+        email: fila.email,
+        nombre: fila.nombre,
+        roles: fila.roles != null ? String(fila.roles) : "",
+      },
+      secret,
+      { expiresIn: expiracion }
+    );
+
+    return res.status(200).json({
+      success: true,
+      token,
+      user: {
+        id_usuario: fila.id_usuario,
+        email: fila.email,
+        nombre: fila.nombre,
+        roles: fila.roles != null ? String(fila.roles) : "",
+      },
+    });
+  } catch (err) {
+    console.error("Error en loginAguacateTemperatura:", err);
+    return res.status(500).json({
+      success: false,
+      mensaje: "Error interno del servidor",
+    });
+  }
+}
+
 
 async function getUsuario() {
     try {
@@ -499,6 +595,7 @@ GROUP BY
     valida,
     getUsuariosRoles,
   loginUsuario,
-  getUsuariosExistenteViaticos
+  loginAguacateTemperatura,
+  getUsuariosExistenteViaticos,
   };
   
