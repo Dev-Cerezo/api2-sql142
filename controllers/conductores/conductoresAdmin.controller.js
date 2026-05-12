@@ -61,6 +61,21 @@ function safeUnlink(filePath) {
   }
 }
 
+/** Libera archivos ya escritos en disco por multer si abortamos antes de Drive/SQL. */
+function cleanupMultipartFiles(filesPorCampo) {
+  if (!filesPorCampo || typeof filesPorCampo !== "object") return;
+  for (const campo of CAMPOS_ARCHIVO) {
+    const arr = filesPorCampo[campo];
+    const f = arr && arr[0];
+    if (!f) continue;
+    const fp =
+      typeof f.path === "string" && f.path
+        ? f.path
+        : path.join(uploadsDir, f.filename || "");
+    safeUnlink(fp);
+  }
+}
+
 function parseEvidenciasJson(raw) {
   if (!raw || typeof raw !== "string") return [];
   try {
@@ -139,6 +154,28 @@ async function eliminarDbPorId(pool, id) {
   );
 }
 
+/**
+ * ¿Hay ya un conductor activo con este no_empleado? (alinea con UQ filtrado por estatus = A).
+ * @param {import('mssql').ConnectionPool} pool
+ * @param {string} noEmp — ya normalizado trim en caller
+ * @param {number|null} excludeId — en UPDATE, ignorar la fila actual
+ */
+async function existeNoEmpleadoActivo(pool, noEmp, excludeId = null) {
+  const req = pool
+    .request()
+    .input("no_empleado", sql.NVarChar(32), noEmp);
+  let q =
+    `SELECT TOP (1) id FROM ${TABLE_CONDUCTORES}
+     WHERE ${SQL_FILTRO_ACTIVO}
+       AND LTRIM(RTRIM(no_empleado)) = LTRIM(RTRIM(@no_empleado))`;
+  if (excludeId != null && Number.isFinite(excludeId)) {
+    req.input("exclude_id", sql.Int, excludeId);
+    q += " AND id <> @exclude_id";
+  }
+  const result = await req.query(q);
+  return Array.isArray(result.recordset) && result.recordset.length > 0;
+}
+
 async function listar(req, res) {
   try {
     const incluirBajas = String(req.query.incluir_bajas || "").toLowerCase();
@@ -159,6 +196,33 @@ async function listar(req, res) {
   } catch (e) {
     console.error("[conductores:listar]", e);
     res.status(500).json({ mensaje: e.message || "Error al listar" });
+  }
+}
+
+/**
+ * GET /conductores/exists?no=12345 — consulta ligera (sin archivos) antes del alta.
+ * Debe declararse en rutas ANTES de GET /:id.
+ */
+async function existeQuery(req, res) {
+  try {
+    const raw =
+      req.query.no != null
+        ? String(req.query.no)
+        : req.query.no_empleado != null
+          ? String(req.query.no_empleado)
+          : "";
+    const noEmp = raw.trim();
+    if (!noEmp) {
+      return res.status(400).json({
+        mensaje: "Indique el número de empleado (query no o no_empleado).",
+      });
+    }
+    const pool = await sql.connect(db);
+    const dup = await existeNoEmpleadoActivo(pool, noEmp, null);
+    return res.status(200).json({ existe: dup });
+  } catch (e) {
+    console.error("[conductores:exists]", e);
+    return res.status(500).json({ mensaje: e.message || "Error al verificar" });
   }
 }
 
@@ -216,6 +280,15 @@ async function crear(req, res) {
 
   try {
     pool = await sql.connect(db);
+
+    if (await existeNoEmpleadoActivo(pool, noEmp, null)) {
+      cleanupMultipartFiles(f);
+      return res.status(409).json({
+        mensaje:
+          "Ya existe un conductor activo con ese número de empleado. Use otro número o revise el listado.",
+      });
+    }
+
     const insert = await pool
       .request()
       .input("no_empleado", sql.NVarChar(32), noEmp)
@@ -278,6 +351,7 @@ async function crear(req, res) {
   } catch (e) {
     const msgRaw = String(e.message || "");
     if (msgRaw.includes(UQ_NO_EMP_ACTIVO) || e.number === 2627) {
+      cleanupMultipartFiles(f);
       return res.status(409).json({
         mensaje: "Ya existe un conductor activo con ese número de empleado.",
       });
@@ -309,6 +383,15 @@ async function actualizar(req, res) {
 
   try {
     const pool = await sql.connect(db);
+
+    if (await existeNoEmpleadoActivo(pool, noEmp, id)) {
+      cleanupMultipartFiles(req.files || {});
+      return res.status(409).json({
+        mensaje:
+          "Ya existe otro conductor activo con ese número de empleado. Corrija el número o deje el actual.",
+      });
+    }
+
     const existe = await pool
       .request()
       .input("id", sql.Int, id)
@@ -387,6 +470,7 @@ async function actualizar(req, res) {
     });
   } catch (e) {
     if (String(e.message || "").includes(UQ_NO_EMP_ACTIVO) || e.number === 2627) {
+      cleanupMultipartFiles(req.files || {});
       return res.status(409).json({
         mensaje: "Ya existe otro conductor activo con ese número de empleado.",
       });
@@ -433,6 +517,7 @@ async function eliminar(req, res) {
 module.exports = {
   multerConductoresCampos,
   listar,
+  existeQuery,
   obtener,
   crear,
   actualizar,
