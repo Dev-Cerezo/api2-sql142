@@ -208,4 +208,17 @@ module.exports = {
   uploadFile2,
   makeFilePublicAnyoneRead,
   uploadPdfBufferToDriveFolder,
+  /**
+   * Descarga contenido UTF-8 de un archivo en Drive (p. ej. JSON maestro).
+   * Depende de permisos OAuth/servicio sobre ese fileId (alcance drive.file puede ser limitado).
+   */
+  async downloadDriveFileAsUtf8(fileId) {
+    const id = String(fileId || "").trim();
+    if (!id) throw new Error("fileId vacío");
+    const res = await drive.files.get(
+      { fileId: id, alt: "media" },
+      { responseType: "arraybuffer" }
+    );
+    return Buffer.from(res.data).toString("utf8");
+  },
 };
